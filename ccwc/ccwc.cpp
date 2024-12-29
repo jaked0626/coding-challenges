@@ -13,7 +13,6 @@ struct Options
     bool is_count_lines {};
     bool is_count_words {};
     bool is_count_chars {};
-    bool is_standard_input { false };
 };
 
 void print_usage(std::ostream& stream)
@@ -26,7 +25,7 @@ void print_usage(std::ostream& stream)
            << "\t-m count the number of characters in a given file.\n";
 }
 
-bool process_arguments(std::ifstream& file, std::string& filepath, Options& opts, int argc, char* argv[])
+bool process_arguments(std::istream*& in, std::string& filepath, Options& opts, int argc, char* argv[])
 {
     program_name = argv[0];
     int opt {};
@@ -77,60 +76,47 @@ bool process_arguments(std::ifstream& file, std::string& filepath, Options& opts
             return false;
         }
 
-        file.open(filepath, std::ios::in | std::ios::binary);
+        static std::ifstream file { filepath, std::ios::in | std::ios::binary };
         if (!file.is_open())
         {
             std::cerr << "Error: file " << filepath << " could not be opened.\n";
             return false;
         }
+
+        in = &file;
     }
     // otherwise, we use standard input.
     else 
     {
-        // create temporary file 
-        // TODO: this is unsafe and has undefined behavior if a file of the same 
-        // name as the temp file already exists. furthermore, it would require 
-        // clean up of the temp file. 
-        opts.is_standard_input = true;
-        std::ofstream temp_file { ".ccwc.tmp.txt", std::ios::app };
-        if (!temp_file || !temp_file.is_open()) 
-        {
-            std::cerr << "Error: failed to create temporary file";
-            return 1;
-        }
-
+        // use an istringstream to read
+        std::string input {};
         std::string line {};
         while (std::getline(std::cin, line))
         {
-            temp_file << line << "\n";
+            input += line += "\n";
         }
-        temp_file.close();
 
-        file.open(".ccwc.tmp.txt", std::ios::in | std::ios::binary);
-        if (!file.is_open())
-        {
-            std::cerr << "Error: file " << filepath << " could not be opened.\n";
-            return false;
-        }
+        static std::istringstream iss { input };
+        in = &iss;
     }
 
     return true;
 }
 
-bool add_byte_count(std::ifstream& file, std::stringstream& ss)
+bool add_byte_count(std::istream& in, std::stringstream& ss)
 {
     int num_bytes { 0 };
     char c {};
 
-    while (file.get(c))
+    while (in.get(c))
     {
         ++num_bytes;
     }
 
-    if (file.eof())
+    if (in.eof())
     {
-        file.clear();
-        file.seekg(0, std::ios::beg);
+        in.clear();
+        in.seekg(0, std::ios::beg);
     }
     else
     {
@@ -142,19 +128,19 @@ bool add_byte_count(std::ifstream& file, std::stringstream& ss)
     return true;
 }
 
-bool add_line_count(std::ifstream& file, std::stringstream& ss)
+bool add_line_count(std::istream& in, std::stringstream& ss)
 {
     int num_lines { 0 };
     std::string line {};
-    while (std::getline(file, line))
+    while (std::getline(in, line))
     {
         ++num_lines;
     }
 
-    if (file.eof())
+    if (in.eof())
     {
-        file.clear();
-        file.seekg(0, std::ios::beg);
+        in.clear();
+        in.seekg(0, std::ios::beg);
     }
     else 
     {
@@ -166,19 +152,19 @@ bool add_line_count(std::ifstream& file, std::stringstream& ss)
     return true;
 }
 
-bool add_word_count(std::ifstream& file, std::stringstream& ss)
+bool add_word_count(std::istream& in, std::stringstream& ss)
 {
     int num_words { 0 };
     std::string word {};
-    while (file >> word)
+    while (in >> word)
     {
         ++num_words;
     }
 
-    if (file.eof())
+    if (in.eof())
     {
-        file.clear();
-        file.seekg(0, std::ios::beg);
+        in.clear();
+        in.seekg(0, std::ios::beg);
     }
     else 
     {
@@ -190,12 +176,12 @@ bool add_word_count(std::ifstream& file, std::stringstream& ss)
     return true;
 }
 
-bool add_char_count(std::ifstream& file, std::stringstream& ss)
+bool add_char_count(std::istream& in, std::stringstream& ss)
 {
     int num_chars { 0 };
     char c {};
 
-    while (file.get(c))
+    while (in.get(c))
     {
         // presupposes utf-8 file encoding. In utf-8, characters are encoded in 
         // 1~4 bytes, and continuation bytes of multibyte characters begin with 
@@ -211,10 +197,10 @@ bool add_char_count(std::ifstream& file, std::stringstream& ss)
         ++num_chars;
     }
 
-    if (file.eof())
+    if (in.eof())
     {
-        file.clear();
-        file.seekg(0, std::ios::beg);
+        in.clear();
+        in.seekg(0, std::ios::beg);
     }
     else
     {
@@ -229,7 +215,7 @@ bool add_char_count(std::ifstream& file, std::stringstream& ss)
 int main(int argc, char* argv[]) 
 {
     // program inputs 
-    std::ifstream file {};
+    std::istream* in {};
     std::string filepath {};
     Options opts {};
 
@@ -238,7 +224,7 @@ int main(int argc, char* argv[])
     
     // process args
     bool ok {};
-    ok = process_arguments(file, filepath, opts, argc, argv);
+    ok = process_arguments(in, filepath, opts, argc, argv);
     if (!ok)
     {
         return 1;
@@ -253,22 +239,22 @@ int main(int argc, char* argv[])
         opts.is_count_words = true;
     }
 
-    if (opts.is_count_bytes && !add_byte_count(file, out)) 
+    if (opts.is_count_bytes && !add_byte_count(*in, out)) 
     {
         std::cerr << "Error: could not read bytes of file.\n";
     }
 
-    if (opts.is_count_lines && !add_line_count(file, out))
+    if (opts.is_count_lines && !add_line_count(*in, out))
     {
         std::cerr << "Error: could not read lines of file.\n";
     }
 
-    if (opts.is_count_words && !add_word_count(file, out))
+    if (opts.is_count_words && !add_word_count(*in, out))
     {
         std::cerr << "Error: could not read words of file.\n";
     }
 
-    if (opts.is_count_chars && !add_char_count(file, out))
+    if (opts.is_count_chars && !add_char_count(*in, out))
     {
         std::cerr << "Error: could not read chars of file.\n";
     }
@@ -276,15 +262,6 @@ int main(int argc, char* argv[])
     out << "\t" << filepath;
 
     std::cout << out.str() << std::endl;
-
-    if (opts.is_standard_input)
-    {
-        if (std::remove(".ccwc.tmp.txt") != 0)
-        {
-            std::cerr << "Error: failed to remove temp file .ccwc.tmp.txt" << "\n";
-            return 1;
-        }
-    }
 
     return 0;
 }
