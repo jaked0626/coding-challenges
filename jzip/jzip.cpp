@@ -5,6 +5,8 @@
 #include <unistd.h>
 #include <unordered_map>
 
+#include "huffman_tree.h"
+
 const char* program_name;
 
 void print_usage(std::ostream& stream)
@@ -90,8 +92,17 @@ bool count_chars(std::fstream& file, std::unordered_map<char, int>& char_counts)
     return true;
 }
 
-bool create_huffman_tree(const std::unordered_map<char, int>& char_counts)
+bool create_tree(const std::unordered_map<char, int>& char_counts, HuffmanTree& tree)
 {
+    try
+    {
+        tree = build_tree(char_counts);
+    }
+    catch (const std::runtime_error& e)
+    {
+        std::cerr << e.what() << "\n";
+        return false;
+    }
     return true;
 }
 
@@ -116,6 +127,23 @@ int main(int argc, char* argv[])
         std::cerr << "Failed to read file.\n";
         return 1;
     }
+
+    int sum { 0 };
+    for (const auto& kv : char_counts)
+    {
+        sum += kv.second;
+    }
+    std::cout << sum << "\n";
+
+    HuffmanTree tree {};
+    ok = create_tree(char_counts, tree);
+    if (!ok)
+    {
+        std::cerr << "Failed to build huffman tree.\n";
+        return 1;
+    }
+
+    std::cout << tree.get_weight() << std::endl;
 
     return 0;
 }

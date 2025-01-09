@@ -1,105 +1,89 @@
 #include <memory>
 #include <map>
 #include <queue>
+#include <iostream>
 
-class HuffmanTreeNode 
+#include "huffman_tree.h"
+
+/* HuffmanTreeNode */
+
+// leaf node constructor 
+HuffmanTreeNode::HuffmanTreeNode(char char_, int weight)
+    : m_char { char_ }
+    , m_weight { weight }
 {
-private:
-    int m_weight {};
-    std::shared_ptr<HuffmanTreeNode> m_left {};
-    std::shared_ptr<HuffmanTreeNode> m_right {};
-    char m_char {};
+}
 
-public:
-    // default constructor
-    HuffmanTreeNode()
-    {
-    }
-
-    // leaf node constructor 
-    HuffmanTreeNode(char char_, int weight)
-        : m_char { char_ }
-        , m_weight { weight }
-    {
-    }
-
-    // internal node constructor
-    HuffmanTreeNode(std::shared_ptr<HuffmanTreeNode> left, std::shared_ptr<HuffmanTreeNode> right)
-        : m_left { left }
-        , m_right { right }
-    {
-        m_weight = m_left->get_weight() + m_right->get_weight();
-    }
-
-    int get_weight() const
-    {
-        return m_weight;
-    }
-
-    bool is_leaf() const
-    {
-        return (m_left == nullptr) && (m_right == nullptr);
-    }
-
-    std::shared_ptr<HuffmanTreeNode> get_left() const
-    {
-        return m_left;
-    }
-
-    std::shared_ptr<HuffmanTreeNode> get_right() const
-    {
-        return m_right;
-    }
-};
-
-class HuffmanTree
+// internal node constructor
+HuffmanTreeNode::HuffmanTreeNode(std::shared_ptr<HuffmanTreeNode> left, std::shared_ptr<HuffmanTreeNode> right)
+    : m_left { left }
+    , m_right { right }
 {
-private:
-    std::shared_ptr<HuffmanTreeNode> m_root {};
-    int m_weight {};
+    m_weight = m_left->get_weight() + m_right->get_weight();
+}
 
-public:
-    // initialize with leaf node
-    HuffmanTree(char char_, int weight)
-        : m_root { std::make_shared<HuffmanTreeNode>(char_, weight) }
-        , m_weight { weight }
-    {
-    }
+int HuffmanTreeNode::get_weight() const
+{
+    return m_weight;
+}
 
-    // initialize with internal node 
-    HuffmanTree(std::shared_ptr<HuffmanTreeNode> left, std::shared_ptr<HuffmanTreeNode> right)
-        : m_root { std::make_shared<HuffmanTreeNode>(left, right) }
-    {
-        m_weight = m_root->get_weight();
-    }
+bool HuffmanTreeNode::is_leaf() const
+{
+    return (m_left == nullptr) && (m_right == nullptr);
+}
 
-    std::shared_ptr<HuffmanTreeNode> get_root() const
-    {
-        return m_root;
-    }
+std::shared_ptr<HuffmanTreeNode> HuffmanTreeNode::get_left() const
+{
+    return m_left;
+}
 
-    int get_weight() const 
-    {
-        return m_root ? m_root->get_weight() : 0;
-    }
+std::shared_ptr<HuffmanTreeNode> HuffmanTreeNode::get_right() const
+{
+    return m_right;
+}
 
-    bool operator< (const HuffmanTree& other)
-    {
-        return get_weight() < other.get_weight();
-    }
+/* Huffman Tree */
 
-    bool operator> (const HuffmanTree& other)
-    {
-        return get_weight() > other.get_weight();
-    }
+// initialize with leaf node
+HuffmanTree::HuffmanTree(char char_, int weight)
+    : m_root { std::make_shared<HuffmanTreeNode>(char_, weight) }
+    , m_weight { weight }
+{
+}
 
-    bool operator== (const HuffmanTree& other)
-    {
-        return get_weight() == other.get_weight();
-    }
-};
+// initialize with internal node 
+HuffmanTree::HuffmanTree(std::shared_ptr<HuffmanTreeNode> left, std::shared_ptr<HuffmanTreeNode> right)
+    : m_root { std::make_shared<HuffmanTreeNode>(left, right) }
+{
+    m_weight = m_root->get_weight();
+}
 
-HuffmanTree build_tree(const std::map<char, int>& char_counts)
+std::shared_ptr<HuffmanTreeNode> HuffmanTree::get_root() const
+{
+    return m_root;
+}
+
+int HuffmanTree::get_weight() const 
+{
+    return m_root ? m_root->get_weight() : 0;
+}
+
+bool HuffmanTree::operator< (const HuffmanTree& other)
+{
+    return get_weight() < other.get_weight();
+}
+
+bool HuffmanTree::operator> (const HuffmanTree& other)
+{
+    return get_weight() > other.get_weight();
+}
+
+bool HuffmanTree::operator== (const HuffmanTree& other)
+{
+    return get_weight() == other.get_weight();
+}
+
+HuffmanTree build_tree(const std::unordered_map<char, int>& char_counts)
 {
     // enqueue huffman trees
     std::priority_queue<HuffmanTree, std::vector<HuffmanTree>, std::greater<>> min_heap {};
@@ -126,9 +110,10 @@ HuffmanTree build_tree(const std::map<char, int>& char_counts)
     return min_heap.top();
 }
 
+#ifdef TEST_HUFFMAN_TREE
 int main()
 {
-    std::map<char, int> char_counts 
+    std::unordered_map<char, int> char_counts 
     {
         { 'a', 5 },
         { 'b', 9 },
@@ -138,5 +123,7 @@ int main()
     };
 
     HuffmanTree tree { build_tree(char_counts) };
+    std::cout << tree.get_weight() << std::endl;
     return 0;
 }
+#endif // TEST_HUFFMAN_TREE
