@@ -27,6 +27,11 @@ int HuffmanTreeNode::get_weight() const
     return m_weight;
 }
 
+char HuffmanTreeNode::get_char() const
+{
+    return m_char ? m_char : '\0';
+}
+
 bool HuffmanTreeNode::is_leaf() const
 {
     return (m_left == nullptr) && (m_right == nullptr);
@@ -110,6 +115,44 @@ HuffmanTree build_tree(const std::unordered_map<char, int>& char_counts)
     return min_heap.top();
 }
 
+std::unordered_map<char, std::string> build_prefix_code_table(const HuffmanTree& tree)
+{
+    std::unordered_map<char, std::string> table {};
+    std::string prefix {};
+    if (auto root { tree.get_root() }; root != nullptr)
+    {
+        build_prefix_code_table_r(*root, table, prefix);
+    }
+
+    return table;
+}
+
+void build_prefix_code_table_r(const HuffmanTreeNode& node, std::unordered_map<char, std::string>& table, std::string& prefix)
+{
+    if (node.is_leaf())
+    {
+        table[node.get_char()] = prefix;
+    }
+    else
+    {
+        if (node.get_left() != nullptr)
+        {
+            prefix.push_back('0');
+            build_prefix_code_table_r(*node.get_left(), table, prefix);
+            prefix.pop_back();
+        }
+        if (node.get_right() != nullptr)
+        {
+            prefix.push_back('1');
+            build_prefix_code_table_r(*node.get_right(), table, prefix);
+            prefix.pop_back();
+        }
+    }
+
+    return;
+}
+
+
 #ifdef TEST_HUFFMAN_TREE
 int main()
 {
@@ -119,11 +162,17 @@ int main()
         { 'b', 9 },
         { 'c', 3 },
         { 'z', 50 },
-        { 'e', 5 }
+        { 'e', 6 }
     };
 
     HuffmanTree tree { build_tree(char_counts) };
-    std::cout << tree.get_weight() << std::endl;
+    std::unordered_map<char, std::string> table { build_prefix_code_table(tree) };
+
+    for (const auto& kv : table) 
+    {
+        std::cout << kv.first << " : " << kv.second << "\n";
+    }
+
     return 0;
 }
 #endif // TEST_HUFFMAN_TREE
