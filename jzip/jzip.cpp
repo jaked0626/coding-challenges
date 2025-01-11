@@ -1,26 +1,31 @@
 #include <iostream>
 #include <fstream>
+#include <sstream>
 #include <string>
 #include <filesystem>
 #include <unistd.h>
 #include <unordered_map>
+#include <bitset>
 
 #include "huffman_tree.h"
 
-const char* program_name;
+const char* PROGRAM_NAME;
+
+const std::string HEADER_DELIMITER { "[[ENDOFHEADER]]" };
 
 void print_usage(std::ostream& stream)
 {
     stream << "jzip compresses files or expands them depending on the filetype passed.\n"
-           << "Usage: " << program_name << " <filepath>\n"
+           << "Usage: " << PROGRAM_NAME << "<-oh>" <<" <filepath>\n"
+           << "\t-o the output filename.\n"
            << "\t-h display this usage information.\n";
 }
 
-bool process_arguments(std::fstream& file, int argc, char* argv[])
+bool process_arguments(std::ifstream& infile, std::string& outfile_name, int argc, char* argv[])
 {
-    program_name = argv[0];
+    PROGRAM_NAME = argv[0];
     int opt {};
-    const char* opt_flags { "h" };
+    const char* opt_flags { "ho:" };
     
     while ((opt = getopt(argc, argv, opt_flags)) != -1)
     {
@@ -29,6 +34,9 @@ bool process_arguments(std::fstream& file, int argc, char* argv[])
         case 'h':
             print_usage(std::cout);
             std::exit(0);
+        case 'o':
+            outfile_name = optarg;
+            break;
         case '?':
             print_usage(std::cerr);
             return false;
@@ -55,11 +63,22 @@ bool process_arguments(std::fstream& file, int argc, char* argv[])
             return false;
         }
 
-        file.open(filepath, std::ios::in | std::ios::binary);
+        infile.open(filepath, std::ios::in | std::ios::binary);
 
-        if (!file.is_open())
+        if (!infile.is_open())
         {
             std::cerr << "Error: file " << filepath << " could not be opened.\n";
+            return false;
+        }
+
+        // if output file name is not provided, use input file name
+        outfile_name = outfile_name != "" ? outfile_name + ".jzip" : filepath + ".jzip";
+
+        // ensure output file does not already exist.
+        std::filesystem::path outfile_path { outfile_name };
+        if (std::filesystem::exists(outfile_path))
+        {
+            std::cerr << "Error: the file " << outfile_path << " already exists. Delete this file before proceeding\n";
             return false;
         }
     }
@@ -72,7 +91,7 @@ bool process_arguments(std::fstream& file, int argc, char* argv[])
     return true;
 }
 
-bool count_chars(std::fstream& file, std::unordered_map<char, int>& char_counts) 
+bool count_chars(std::ifstream& file, std::unordered_map<char, int>& char_counts) 
 {
     char c {};
     while (file.get(c))
@@ -106,34 +125,144 @@ bool create_tree(const std::unordered_map<char, int>& char_counts, HuffmanTree& 
     return true;
 }
 
+bool create_prefix_table(const HuffmanTree& tree, std::unordered_map<char, std::string>& table)
+{
+    try 
+    {
+        table = build_prefix_code_table(tree);
+    }
+    catch (const std::runtime_error& e)
+    {
+        std::cerr << e.what() << "\n";
+        return false;
+    }
+    return true;
+}
+
+bool write_header(const std::unordered_map<char, std::string>& prefix_table, std::ofstream& outfile)
+{
+    for (const auto& kv : prefix_table)
+    {
+        // store as hex to simplify treatment of special chars like new line. 
+        outfile << std::hex << static_cast<int>(static_cast<unsigned char>(kv.first)) << " " << kv.second << "\n";
+    }
+    outfile << HEADER_DELIMITER << "\n";
+    
+    if (outfile.bad())
+    {
+        return false;
+    }
+
+    return true;
+}
+
+bool read_header(std::ifstream& file, std::unordered_map<char, std::string>& prefix_table)
+{
+    std::string line {};
+    std::string hex_char {};
+    char char_ {};
+    std::string prefix_code {};
+    while (std::getline(file, line) && line != HEADER_DELIMITER)
+    {
+        try 
+        {
+            std::istringstream iss { line };
+            iss >> hex_char;
+            iss >> prefix_code;
+            char_ = static_cast<char>(std::stoi(hex_char, nullptr, 16));
+            std::cout << char_ << " " << prefix_code << "\n";
+            prefix_table[char_] = prefix_code;
+        }
+        catch(std::runtime_error& e)
+        {
+            std::cerr << e.what() << "\n";
+            return false;
+        }
+    }
+
+    return  true;
+}
+
+std::vector<uint8_t> pack_bits_to_bytes(const std::string& bits) {
+    std::vector<uint8_t> byte_stream;
+    uint8_t current_byte = 0;
+    int bit_count = 0;
+
+    for (char bit : bits) {
+        if (bit == '1') {
+            current_byte |= (1 << (7 - bit_count));  // Set the bit at the correct position
+        }
+        bit_count++;
+
+        if (bit_count == 8) {  // Once we fill a byte, push it to the vector
+            byte_stream.push_back(current_byte);
+            current_byte = 0;  // Reset the byte for the next group of bits
+            bit_count = 0;  // Reset bit counter
+        }
+    }
+
+    // If there are any remaining bits (less than 8 bits left)
+    if (bit_count > 0) {
+        byte_stream.push_back(current_byte);  // Add the remaining bits as the final byte
+    }
+
+    return byte_stream;
+}
+
+bool write_body(const std::unordered_map<char, std::string>& prefix_table, std::ifstream& infile, std::ofstream& outfile)
+{
+    // go back to the top of the file to read. 
+    infile.clear();
+    infile.seekg(0, std::ios::beg);
+
+    char c {};
+    std::string code {};
+    std::string bitstream {};
+    while (infile.get(c))
+    {
+        auto it = prefix_table.find(c);
+        if (it != prefix_table.end())
+        {
+            code = it->second;
+        }
+        else 
+        {
+            std::cerr << "unknown character, file has been corrupted\n";
+            return false;
+        }
+
+        // translate into bitset
+        bitstream += code;
+    }
+
+    std::vector<uint8_t> byte_stream = pack_bits_to_bytes(bitstream);
+    outfile.write(reinterpret_cast<const char*>(byte_stream.data()), byte_stream.size());
+
+    return true;
+}
+
 int main(int argc, char* argv[]) 
 {
     // program inputs 
-    std::fstream file {};
+    std::ifstream infile {};
+    std::string outfile_name {};
     std::string filepath {};
-    std::unordered_map<char, int> char_counts {};
     
     // process args
     bool ok {};
-    ok = process_arguments(file, argc, argv);
+    ok = process_arguments(infile, outfile_name, argc, argv);
     if (!ok)
     {
         return 1;
     }
 
-    ok = count_chars(file, char_counts);
+    std::unordered_map<char, int> char_counts {};
+    ok = count_chars(infile, char_counts);
     if (!ok) 
     {
         std::cerr << "Failed to read file.\n";
         return 1;
     }
-
-    int sum { 0 };
-    for (const auto& kv : char_counts)
-    {
-        sum += kv.second;
-    }
-    std::cout << sum << "\n";
 
     HuffmanTree tree {};
     ok = create_tree(char_counts, tree);
@@ -143,7 +272,40 @@ int main(int argc, char* argv[])
         return 1;
     }
 
-    std::cout << tree.get_weight() << std::endl;
+    std::unordered_map<char, std::string> prefix_table {};
+    ok = create_prefix_table(tree, prefix_table);
+    if (!ok) 
+    {
+        std::cerr << "Failed to build prefix code table.\n";
+        return 1;
+    }
+
+    std::ofstream outfile { outfile_name };
+    ok = write_header(prefix_table, outfile);
+    if (!ok) 
+    {
+        std::cerr << "Failed to write header to compressed file.\n";
+        return 1;
+    }
+
+    ok = write_body(prefix_table, infile, outfile);
+    if (!ok)
+    {
+        std::cerr << "Failed to write body to compressed file.\n";
+        return 1;
+    }
+
+    outfile.close();
+
+    std::ifstream test { "../test.txt.jzip", std::ios::in | std::ios::binary };
+    std::unordered_map<char, std::string> testt {};
+
+    ok = read_header(test, testt);
+    if (!ok)
+    {
+        return 1;
+    }
+
 
     return 0;
 }
