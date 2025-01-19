@@ -11,8 +11,6 @@
 
 const char* PROGRAM_NAME;
 
-const std::string HEADER_DELIMITER { "[[ENDOFHEADER]]" };
-
 void print_usage(std::ostream& stream)
 {
     stream << "jzip compresses files or expands them depending on the filetype passed.\n"
@@ -93,10 +91,10 @@ bool process_arguments(std::ifstream& infile, std::string& outfile_name, int arg
 
 bool count_chars(std::ifstream& file, std::unordered_map<char, int>& char_counts) 
 {
-    char c {};
-    while (file.get(c))
+    char ch {};
+    while (file.get(ch))
     {
-        ++char_counts[c];
+        ++char_counts[ch];
     }
     if (file.eof())
     {
@@ -139,15 +137,66 @@ bool create_prefix_table(const HuffmanTree& tree, std::unordered_map<char, std::
     return true;
 }
 
-bool write_header(const std::unordered_map<char, std::string>& prefix_table, std::ofstream& outfile)
+std::vector<uint8_t> codes_to_bytes(const std::string& code) 
 {
-    for (const auto& kv : prefix_table)
+    std::vector<uint8_t> byte_stream {};
+    uint8_t current_byte { 0 }; 
+    int bit_count { 0 };
+
+    for (char bit : code) 
     {
-        // store as hex to simplify treatment of special chars like new line. 
-        outfile << std::hex << static_cast<int>(static_cast<unsigned char>(kv.first)) << " " << kv.second << "\n";
+        if (bit == '1')
+        {
+            current_byte |= (1 << (7 - bit_count)); // adds 1 to the desired position.
+        }
+        bit_count++;
+
+        if (bit_count == 8)
+        {
+            byte_stream.push_back(current_byte);
+            current_byte = 0;
+            bit_count = 0;
+        }
     }
-    outfile << HEADER_DELIMITER << "\n";
-    
+
+    // take care of the remaining bits and pack them into a single byte. 
+    if (bit_count > 0) 
+    {
+        byte_stream.push_back(current_byte);
+    }
+
+    return byte_stream;
+}
+
+bool write_bits(std::ofstream& outfile, const std::string& bit_string)
+{
+    uint8_t current_byte { 0 };
+    int bit_count { 0 };
+
+    for (char bit : bit_string)
+    {
+        if (bit == '1')
+        {
+            current_byte |= (1 << (7 - bit_count)); // adds 1 to the desired position.
+        }
+        ++bit_count;
+
+        // flush byte
+        if (bit_count == 8)
+        {
+            outfile.put(current_byte);
+            current_byte = 0;
+            bit_count = 0;
+        }
+    }
+
+    // left over bits are packed into a byte
+    if (bit_count > 0)
+    {
+        current_byte <<= (8 - bit_count); // shift the bits and pack them to the left
+        outfile.put(current_byte);
+    }
+
     if (outfile.bad())
     {
         return false;
@@ -156,90 +205,161 @@ bool write_header(const std::unordered_map<char, std::string>& prefix_table, std
     return true;
 }
 
-bool read_header(std::ifstream& file, std::unordered_map<char, std::string>& prefix_table)
+bool read_code_from_bits(std::ifstream& infile, uint8_t bit_count, std::string& prefix_code)
 {
-    std::string line {};
-    std::string hex_char {};
-    char char_ {};
-    std::string prefix_code {};
-    while (std::getline(file, line) && line != HEADER_DELIMITER)
+    uint8_t current_byte {};
+    int remaining_bits { bit_count };
+    int remaining_bits_per_byte {};
+
+    while (remaining_bits > 0)
     {
-        try 
+        infile.read(reinterpret_cast<char*>(&current_byte), 1);
+
+        // we want to read the byte bit by bit from the left most bit. 
+        // since we are reading in chunks by bytes, we need to keep track of the 
+        // remaining bits so as not to over read.
+        remaining_bits_per_byte = std::min(remaining_bits, 8);
+
+        for (int i = 7; i >= 8 - remaining_bits_per_byte; --i)
         {
-            std::istringstream iss { line };
-            iss >> hex_char;
-            iss >> prefix_code;
-            char_ = static_cast<char>(std::stoi(hex_char, nullptr, 16));
-            std::cout << char_ << " " << prefix_code << "\n";
-            prefix_table[char_] = prefix_code;
+            prefix_code += ((current_byte >> i) & 1) ? '1' : '0';
+            --remaining_bits;
         }
-        catch(std::runtime_error& e)
+    }
+
+    if (infile.bad())
+    {
+        return false;
+    }
+
+    return true;
+}
+
+bool write_header(std::ofstream& outfile, const std::unordered_map<char, std::string>& prefix_table)
+{
+    // we write the number of elements in the prefix table to the header first to determine 
+    // how much of the file is part of the header.
+    uint16_t header_size = prefix_table.size(); // copy initialize to allow narrowing conversion.
+    outfile.write(reinterpret_cast<const char*>(&header_size), sizeof(header_size));
+    bool ok {};
+
+    for (const auto& [ch, prefix_code] : prefix_table)
+    {
+        // we place the character, the size of the prefix_code, and the prefix_code in that 
+        // order, so we know how many bits to read to retrieve the code.
+        uint8_t prefix_code_size = prefix_code.size(); // copy initialize to allow narrowing conversion.
+        outfile.put(ch);
+        outfile.put(prefix_code_size);
+        ok = write_bits(outfile, prefix_code);
+        if (!ok)
         {
-            std::cerr << e.what() << "\n";
             return false;
         }
+    }
+
+    if (outfile.bad())
+    {
+        return false;
+    }
+
+    return true;
+}
+
+bool read_header(std::ifstream& infile, std::unordered_map<char, std::string>& prefix_table)
+{
+    bool ok {};
+
+    // read first 16 bits where we store the number of elements in the prefix_table.
+    uint16_t header_size {};
+    infile.read(reinterpret_cast<char*>(&header_size), sizeof(header_size));
+
+    for (uint16_t i = 0; i < header_size; ++i)
+    {
+        char ch {};
+        uint8_t prefix_code_size {};
+        std::string prefix_code {};
+
+        // read ch, prefix_code_size, and code in that order. ch is 1 byte and 
+        // code is number of bits specified in prefix_code_size
+        infile.read(&ch, 1);
+        infile.read(reinterpret_cast<char*>(&prefix_code_size), 1);
+        ok = read_code_from_bits(infile, prefix_code_size, prefix_code);
+        if (!ok)
+        {
+            return false;
+        }
+        prefix_table[ch] = prefix_code;
+    }
+
+    if (infile.bad())
+    {
+        return false;
     }
 
     return  true;
 }
 
-std::vector<uint8_t> pack_bits_to_bytes(const std::string& bits) {
-    std::vector<uint8_t> byte_stream;
-    uint8_t current_byte = 0;
-    int bit_count = 0;
-
-    for (char bit : bits) {
-        if (bit == '1') {
-            current_byte |= (1 << (7 - bit_count));  // Set the bit at the correct position
-        }
-        bit_count++;
-
-        if (bit_count == 8) {  // Once we fill a byte, push it to the vector
-            byte_stream.push_back(current_byte);
-            current_byte = 0;  // Reset the byte for the next group of bits
-            bit_count = 0;  // Reset bit counter
-        }
-    }
-
-    // If there are any remaining bits (less than 8 bits left)
-    if (bit_count > 0) {
-        byte_stream.push_back(current_byte);  // Add the remaining bits as the final byte
-    }
-
-    return byte_stream;
-}
-
-bool write_body(const std::unordered_map<char, std::string>& prefix_table, std::ifstream& infile, std::ofstream& outfile)
+bool write_body(std::ifstream& infile, std::ofstream& outfile, const std::unordered_map<char, std::string>& prefix_table)
 {
-    // go back to the top of the file to read. 
+    // go back to the top of the source infile to read the whole file.
     infile.clear();
     infile.seekg(0, std::ios::beg);
 
-    char c {};
-    std::string code {};
-    std::string bitstream {};
-    while (infile.get(c))
+    char ch {};
+    std::string prefix_code {};
+    std::string bit_string { "" };
+    bool ok {};
+
+    while (infile.get(ch))
     {
-        auto it = prefix_table.find(c);
+        // retrieve prefix code from table. If the char is not in the table, we've fucked up. 
+        auto it { prefix_table.find(ch) };
         if (it != prefix_table.end())
         {
-            code = it->second;
+            prefix_code = it->second;
         }
         else 
         {
-            std::cerr << "unknown character, file has been corrupted\n";
             return false;
         }
 
-        // translate into bitset
-        bitstream += code;
+        // add code to bit_string and write it all to the file as bits in the end.
+        bit_string += prefix_code;
     }
 
-    std::vector<uint8_t> byte_stream = pack_bits_to_bytes(bitstream);
-    outfile.write(reinterpret_cast<const char*>(byte_stream.data()), byte_stream.size());
+    ok = write_bits(outfile, bit_string);
+    if (!ok)
+    {
+        return false;
+    }
+
+    if (infile.bad() || outfile.bad())
+    {
+        return false;
+    }
 
     return true;
 }
+
+template <typename K, typename V>
+std::unordered_map<V, K> reverse_map(const std::unordered_map<K, V>& map)
+{
+    std::unordered_map<K, V> reversed_map {};
+    for (auto& [k, v] : map)
+    {
+        reversed_map[v] = k;
+    }
+
+    return reversed_map;
+}
+
+// bool read_body(std::ifstream& infile, std::ofstream& outfile, const std::unordered_map<char, std::string>& prefix_table)
+// {
+//     std::unordered_map<std::string, char> reverse_prefix_table { reverse_map(prefix_table) };
+
+    
+//     return true;
+// }
 
 int main(int argc, char* argv[]) 
 {
@@ -281,14 +401,14 @@ int main(int argc, char* argv[])
     }
 
     std::ofstream outfile { outfile_name };
-    ok = write_header(prefix_table, outfile);
+    ok = write_header(outfile, prefix_table);
     if (!ok) 
     {
         std::cerr << "Failed to write header to compressed file.\n";
         return 1;
     }
 
-    ok = write_body(prefix_table, infile, outfile);
+    ok = write_body(infile, outfile, prefix_table);
     if (!ok)
     {
         std::cerr << "Failed to write body to compressed file.\n";
@@ -306,6 +426,10 @@ int main(int argc, char* argv[])
         return 1;
     }
 
+    for (auto& [ch, code] : testt)
+    {
+        std::cout << ch << ":" << code << "\n";
+    }
 
     return 0;
 }

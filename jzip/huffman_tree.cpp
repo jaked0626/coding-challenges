@@ -8,8 +8,8 @@
 /* HuffmanTreeNode */
 
 // leaf node constructor 
-HuffmanTreeNode::HuffmanTreeNode(char char_, int weight)
-    : m_char { char_ }
+HuffmanTreeNode::HuffmanTreeNode(char ch, int weight)
+    : m_char { ch }
     , m_weight { weight }
 {
 }
@@ -50,8 +50,8 @@ std::shared_ptr<HuffmanTreeNode> HuffmanTreeNode::get_right() const
 /* Huffman Tree */
 
 // initialize with leaf node
-HuffmanTree::HuffmanTree(char char_, int weight)
-    : m_root { std::make_shared<HuffmanTreeNode>(char_, weight) }
+HuffmanTree::HuffmanTree(char ch, int weight)
+    : m_root { std::make_shared<HuffmanTreeNode>(ch, weight) }
     , m_weight { weight }
 {
 }
@@ -93,11 +93,9 @@ HuffmanTree build_tree(const std::unordered_map<char, int>& char_counts)
     // enqueue huffman trees
     std::priority_queue<HuffmanTree, std::vector<HuffmanTree>, std::greater<>> min_heap {};
 
-    for (const auto& kv : char_counts)
+    for (const auto& [ch, weight] : char_counts)
     {
-        char char_ { kv.first };
-        int weight { kv.second };
-        HuffmanTree tree { char_, weight };
+        HuffmanTree tree { ch, weight };
         min_heap.push(std::move(tree));
     }
 
@@ -150,6 +148,47 @@ void build_prefix_code_table_r(const HuffmanTreeNode& node, std::unordered_map<c
     }
 
     return;
+}
+
+char get_char_from_code(const std::string& prefix_code, const HuffmanTree& tree)
+{
+    std::shared_ptr<HuffmanTreeNode> current_node { tree.get_root() };
+    for (auto& ch : prefix_code)
+    {
+        if (ch == '0')
+        {
+            current_node = current_node->get_left();
+        }
+        else if (ch == '1')
+        {
+            current_node = current_node->get_right();
+        }
+    }
+
+    return current_node->get_char();
+}
+
+std::string get_string_from_codes(const std::string& prefix_codes, const HuffmanTree& tree)
+{
+    std::string output {};
+    std::shared_ptr<HuffmanTreeNode> current_node { tree.get_root() };
+    for (auto& ch : prefix_codes)
+    {
+        if (ch == '0')
+        {
+            current_node = current_node->get_left();
+        }
+        else if (ch == '1')
+        {
+            current_node = current_node->get_right();
+        }
+
+        if (current_node->is_leaf())
+        {
+            output += current_node->get_char();
+            current_node = tree.get_root();
+        }
+    }
 }
 
 

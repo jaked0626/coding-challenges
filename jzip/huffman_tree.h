@@ -46,3 +46,5 @@ public:
 HuffmanTree build_tree(const std::unordered_map<char, int>& char_counts);
 std::unordered_map<char, std::string> build_prefix_code_table(const HuffmanTree& tree);
 void build_prefix_code_table_r(const HuffmanTreeNode& node, std::unordered_map<char, std::string>& table, std::string& prefix);
+char get_char_from_code(const std::string& prefix_code, const HuffmanTree& tree);
+std::string get_string_from_codes(const std::string& prefix_codes, const HuffmanTree& tree);
