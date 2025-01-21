@@ -344,7 +344,7 @@ bool write_body(std::ifstream& infile, std::ofstream& outfile, const std::unorde
 template <typename K, typename V>
 std::unordered_map<V, K> reverse_map(const std::unordered_map<K, V>& map)
 {
-    std::unordered_map<K, V> reversed_map {};
+    std::unordered_map<V, K> reversed_map {};
     for (auto& [k, v] : map)
     {
         reversed_map[v] = k;
@@ -353,13 +353,42 @@ std::unordered_map<V, K> reverse_map(const std::unordered_map<K, V>& map)
     return reversed_map;
 }
 
-// bool read_body(std::ifstream& infile, std::ofstream& outfile, const std::unordered_map<char, std::string>& prefix_table)
-// {
-//     std::unordered_map<std::string, char> reverse_prefix_table { reverse_map(prefix_table) };
+// TODO: clean the handling of chunk_size. There is a problem where it interprets the trailing bits as prefix
+// codes as well. we must assign a particular code to this so as not to read them as characters.
+// additionally, would it be faster to use the reversed map, versus searching the prefix code tree? I guess it depends on the map
+// look up time. Both should be linear.
+bool read_body(std::ifstream& infile, std::ofstream& outfile, const std::unordered_map<char, std::string>& prefix_table, const HuffmanTree& tree)
+{
+    std::unordered_map<std::string, char> reverse_prefix_table { reverse_map(prefix_table) };
+    bool ok {};
 
+    std::streampos body_start { infile.tellg() };
+    std::cout << body_start << "\n";
+    infile.seekg(0, std::ios::end);
+    std::streampos body_end { infile.tellg() };
+    std::cout << body_end << "\n";
+    infile.seekg(body_start, std::ios::beg);
+
+    int remaining_bits { static_cast<int>((body_end - body_start) * 8 ) }; 
+    int chunk_size { 248 }; // MUST BE MULTIPLE OF 8
+    std::string codes {};
+    std::string decoded_body {};
+
+    while (remaining_bits > 0)
+    {
+        std::string chunk_codes {};
+        uint8_t current_chunk = std::min(chunk_size, remaining_bits); // copy initialize for narrowing conversion. 
+        ok = read_code_from_bits(infile, current_chunk, chunk_codes);
+        codes += chunk_codes;
+        remaining_bits -= current_chunk;
+    }
+
+    decoded_body = get_string_from_codes(codes, tree);
+
+    std::cout << decoded_body << std::endl;
     
-//     return true;
-// }
+    return true;
+}
 
 int main(int argc, char* argv[]) 
 {
@@ -417,19 +446,26 @@ int main(int argc, char* argv[])
 
     outfile.close();
 
-    std::ifstream test { "../test.txt.jzip", std::ios::in | std::ios::binary };
-    std::unordered_map<char, std::string> testt {};
+    std::ifstream testin { "../test.txt.jzip", std::ios::in | std::ios::binary };
+    std::ofstream testout { "../test.txt.out" };
+    std::unordered_map<char, std::string> testmap {};
 
-    ok = read_header(test, testt);
+    ok = read_header(testin, testmap);
+    if (!ok)
+    {
+        return 1;
+    }
+    for (auto& [ch, code] : testmap)
+    {
+        std::cout << ch << ":" << code << "\n";
+    }
+
+    ok = read_body(testin, testout, testmap, tree);
     if (!ok)
     {
         return 1;
     }
 
-    for (auto& [ch, code] : testt)
-    {
-        std::cout << ch << ":" << code << "\n";
-    }
 
     return 0;
 }

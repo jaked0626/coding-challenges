@@ -189,6 +189,8 @@ std::string get_string_from_codes(const std::string& prefix_codes, const Huffman
             current_node = tree.get_root();
         }
     }
+
+    return output;
 }
 
 
