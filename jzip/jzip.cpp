@@ -137,43 +137,13 @@ bool create_prefix_table(const HuffmanTree& tree, std::unordered_map<char, std::
     return true;
 }
 
-std::vector<uint8_t> codes_to_bytes(const std::string& code) 
-{
-    std::vector<uint8_t> byte_stream {};
-    uint8_t current_byte { 0 }; 
-    int bit_count { 0 };
-
-    for (char bit : code) 
-    {
-        if (bit == '1')
-        {
-            current_byte |= (1 << (7 - bit_count)); // adds 1 to the desired position.
-        }
-        bit_count++;
-
-        if (bit_count == 8)
-        {
-            byte_stream.push_back(current_byte);
-            current_byte = 0;
-            bit_count = 0;
-        }
-    }
-
-    // take care of the remaining bits and pack them into a single byte. 
-    if (bit_count > 0) 
-    {
-        byte_stream.push_back(current_byte);
-    }
-
-    return byte_stream;
-}
 
 bool write_bits(std::ofstream& outfile, const std::string& bit_string)
 {
     uint8_t current_byte { 0 };
     int bit_count { 0 };
 
-    for (char bit : bit_string)
+    for (char bit : bit_string) // 01
     {
         if (bit == '1')
         {
@@ -190,10 +160,9 @@ bool write_bits(std::ofstream& outfile, const std::string& bit_string)
         }
     }
 
-    // left over bits are packed into a byte
+    // left over bits are packed into a byte. 
     if (bit_count > 0)
     {
-        current_byte <<= (8 - bit_count); // shift the bits and pack them to the left
         outfile.put(current_byte);
     }
 
@@ -205,7 +174,7 @@ bool write_bits(std::ofstream& outfile, const std::string& bit_string)
     return true;
 }
 
-bool read_code_from_bits(std::ifstream& infile, uint8_t bit_count, std::string& prefix_code)
+bool read_bits_as_string(std::ifstream& infile, uint8_t bit_count, std::string& bit_string)
 {
     uint8_t current_byte {};
     int remaining_bits { bit_count };
@@ -220,9 +189,9 @@ bool read_code_from_bits(std::ifstream& infile, uint8_t bit_count, std::string& 
         // remaining bits so as not to over read.
         remaining_bits_per_byte = std::min(remaining_bits, 8);
 
-        for (int i = 7; i >= 8 - remaining_bits_per_byte; --i)
+        for (int i = 7; i >= 8 - remaining_bits_per_byte; --i) 
         {
-            prefix_code += ((current_byte >> i) & 1) ? '1' : '0';
+            bit_string += ((current_byte >> i) & 1) ? '1' : '0';
             --remaining_bits;
         }
     }
@@ -283,7 +252,7 @@ bool read_header(std::ifstream& infile, std::unordered_map<char, std::string>& p
         // code is number of bits specified in prefix_code_size
         infile.read(&ch, 1);
         infile.read(reinterpret_cast<char*>(&prefix_code_size), 1);
-        ok = read_code_from_bits(infile, prefix_code_size, prefix_code);
+        ok = read_bits_as_string(infile, prefix_code_size, prefix_code);
         if (!ok)
         {
             return false;
@@ -327,6 +296,16 @@ bool write_body(std::ifstream& infile, std::ofstream& outfile, const std::unorde
         bit_string += prefix_code;
     }
 
+    // last byte that we write will pack trailing 0s for bits. We don't want to 
+    // accidentally read these when decompressing. 
+    // double modulo to deal with the case that the size of bit_string is a multiple of 8. 
+    // copy intialize to allow narrowing conversion.
+    uint8_t trailing_bits = (8 - (bit_string.size() % 8)) % 8;
+
+    // we write the number of trailing_bits first so that we know to ignore these 
+    // bits when decompressing. 
+    outfile.write(reinterpret_cast<const char*>(&trailing_bits), sizeof(trailing_bits));
+
     ok = write_bits(outfile, bit_string);
     if (!ok)
     {
@@ -353,39 +332,54 @@ std::unordered_map<V, K> reverse_map(const std::unordered_map<K, V>& map)
     return reversed_map;
 }
 
-// TODO: clean the handling of chunk_size. There is a problem where it interprets the trailing bits as prefix
-// codes as well. we must assign a particular code to this so as not to read them as characters.
+// TODO: clean the handling of chunk_size. 
 // additionally, would it be faster to use the reversed map, versus searching the prefix code tree? I guess it depends on the map
-// look up time. Both should be linear.
+// look up time vs tree look up time. Both should be linear.
 bool read_body(std::ifstream& infile, std::ofstream& outfile, const std::unordered_map<char, std::string>& prefix_table, const HuffmanTree& tree)
 {
     std::unordered_map<std::string, char> reverse_prefix_table { reverse_map(prefix_table) };
     bool ok {};
 
+    // don't want to read the trailing 0s packed in with the last byte.
+    uint8_t trailing_bits {};
+    infile.read(reinterpret_cast<char*>(&trailing_bits), sizeof(trailing_bits));
+
+    // get the byte size of the body
     std::streampos body_start { infile.tellg() };
-    std::cout << body_start << "\n";
     infile.seekg(0, std::ios::end);
     std::streampos body_end { infile.tellg() };
-    std::cout << body_end << "\n";
     infile.seekg(body_start, std::ios::beg);
 
-    int remaining_bits { static_cast<int>((body_end - body_start) * 8 ) }; 
-    int chunk_size { 248 }; // MUST BE MULTIPLE OF 8
-    std::string codes {};
+    // get the bit size of the body, allow narrowing conversion. Dont forget to treat 
+    // for trailing bits here. 
+    int remaining_bits = (body_end - body_start) * 8 - trailing_bits;
+
+    // read the file chunk by chunk. This chunk must be a multiple of 8, otherwise we 
+    // end up skipping bits. We use an int type here because we want to compare with 
+    // another int type later to get the minimum. 
+    int chunk_size { 31 * 8 };
+
+    std::string encoded_body {};
     std::string decoded_body {};
 
     while (remaining_bits > 0)
     {
-        std::string chunk_codes {};
-        uint8_t current_chunk = std::min(chunk_size, remaining_bits); // copy initialize for narrowing conversion. 
-        ok = read_code_from_bits(infile, current_chunk, chunk_codes);
-        codes += chunk_codes;
-        remaining_bits -= current_chunk;
+        uint8_t bits_to_read = std::min(chunk_size, remaining_bits);
+        std::string bit_string {};
+
+        ok = read_bits_as_string(infile, bits_to_read, bit_string);
+        if (!ok)
+        {
+            return false;
+        }
+
+        encoded_body += bit_string;
+        remaining_bits -= bits_to_read;
     }
 
-    decoded_body = get_string_from_codes(codes, tree);
+    decoded_body = get_string_from_codes(encoded_body, tree);
 
-    std::cout << decoded_body << std::endl;
+    outfile << decoded_body;
     
     return true;
 }
@@ -455,10 +449,6 @@ int main(int argc, char* argv[])
     {
         return 1;
     }
-    for (auto& [ch, code] : testmap)
-    {
-        std::cout << ch << ":" << code << "\n";
-    }
 
     ok = read_body(testin, testout, testmap, tree);
     if (!ok)
@@ -469,4 +459,3 @@ int main(int argc, char* argv[])
 
     return 0;
 }
-
