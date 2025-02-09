@@ -4,6 +4,7 @@
 #include <string>
 
 #include "utils.h"
+#include "decompress.h"
 
 
 bool read_code_by_bits_from_file(std::ifstream& infile, uint8_t bit_count, std::string& code_string)
@@ -109,9 +110,6 @@ bool read_encoded_body_from_compressed_file(std::ifstream& infile, std::string& 
     // another int type later to get the minimum. 
     int chunk_size { 31 * 8 };
 
-    std::string encoded_body {};
-    std::string decoded_body {};
-
     while (remaining_bits > 0)
     {
         uint8_t bits_to_read = std::min(chunk_size, remaining_bits);
@@ -127,9 +125,10 @@ bool read_encoded_body_from_compressed_file(std::ifstream& infile, std::string& 
         remaining_bits -= bits_to_read;
     }
 
-    ok = infile.bad();
+    ok = !infile.bad();
     if (!ok)
     {
+        std::cerr << "Error: input file is broken.\n";
         return false;
     }
 
@@ -147,12 +146,14 @@ bool read_decoded_body_from_compressed_file(std::ifstream& infile, const std::un
     ok = read_encoded_body_from_compressed_file(infile, encoded_body);
     if (!ok)
     {
+        std::cerr << "Error: failure at retrieving encoded body from input file.\n";
         return false;
     }
 
     ok = decode_body_w_reverse_prefix_table(encoded_body, reverse_prefix_table, decoded_body);
     if (!ok)
     {
+        std::cerr << "Error: failure at converting encoded body to decoded text.\n";
         return false;
     }
     
@@ -160,29 +161,32 @@ bool read_decoded_body_from_compressed_file(std::ifstream& infile, const std::un
 }
 
 // writes decompressed file to output file.
-bool decompress_file(std::ifstream& compressed_file, std::ofstream& output_file)
+bool decompress_file(std::ifstream& infile, std::ofstream& outfile)
 {
     std::unordered_map<char, std::string> prefix_table {};
     std::string decoded_body {};
     bool ok {};
 
-    ok = read_header_from_compressed_file(compressed_file, prefix_table);
+    ok = read_header_from_compressed_file(infile, prefix_table);
     if (!ok) 
     {
+        std::cerr << "Error: failed to read header from compressed file.\n";
         return false;
     }
 
-    ok = read_decoded_body_from_compressed_file(compressed_file, prefix_table, decoded_body);
+    ok = read_decoded_body_from_compressed_file(infile, prefix_table, decoded_body);
     if (!ok) 
     {
+        std::cerr << "Error: failed to read body from compressed file.\n";
         return false;
     }
 
-    output_file << decoded_body;
+    outfile << decoded_body;
 
-    ok = compressed_file.bad() || output_file.bad();
+    ok = !infile.bad() && !outfile.bad();
     if (!ok)
     {
+        std::cerr << "Error: input or output files are corrupt.\n";
         return false;
     }
 

@@ -40,3 +40,6 @@ build/
 
 # OS related
 .DS_Store
+
+# for jzip 
+*.jzip

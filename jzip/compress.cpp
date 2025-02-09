@@ -2,7 +2,9 @@
 #include <fstream>
 #include <unordered_map>
 #include <string>
-#include "huffman_tree.h"
+
+#include "huffman.h"
+#include "compress.h"
 
 bool count_chars_in_file(std::ifstream& infile, std::unordered_map<char, int>& char_counts) 
 {

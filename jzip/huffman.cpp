@@ -3,7 +3,7 @@
 #include <queue>
 #include <iostream>
 
-#include "huffman_tree.h"
+#include "huffman.h"
 
 /* HuffmanTreeNode */
 

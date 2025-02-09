@@ -5,8 +5,8 @@ project("jzip")
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED True)
 
-add_executable(huffman huffman_tree.cpp)
-add_executable(jzip jzip.cpp huffman_tree.cpp)
+add_executable(huffman huffman.cpp)
+add_executable(jzip jzip.cpp huffman.cpp compress.cpp decompress.cpp)
 
 target_compile_definitions(huffman PRIVATE TEST_HUFFMAN_TREE)
 
