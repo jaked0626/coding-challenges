@@ -1,4 +1,4 @@
-# jzi: My own compression tool  
+# jzip: My own compression tool  
 See [here](https://codingchallenges.fyi/challenges/challenge-huffman) for problem description
 
 
