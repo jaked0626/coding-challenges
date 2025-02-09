@@ -1,11 +1,9 @@
 #include <iostream>
 #include <fstream>
-#include <sstream>
 #include <string>
 #include <filesystem>
 #include <unistd.h>
 #include <unordered_map>
-#include <bitset>
 
 #include "huffman_tree.h"
 
@@ -91,6 +89,10 @@ bool process_arguments(std::ifstream& infile, std::string& outfile_name, int arg
 
 bool count_chars(std::ifstream& file, std::unordered_map<char, int>& char_counts) 
 {
+    // start from the beginning of the file
+    file.clear();
+    file.seekg(0, std::ios::beg);
+    
     char ch {};
     while (file.get(ch))
     {
